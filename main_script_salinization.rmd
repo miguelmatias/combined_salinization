@@ -1,0 +1,379 @@
+---
+title: "Salinization effects on macroinvertebrates"
+output:
+  html_notebook: default
+  pdf_document: default
+fontsize: 11pt
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+# Knitr defaults
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  fig.asp = 0.65, fig.width = 10, out.width = "100%"
+)
+
+# ===== Packages =====
+library(tidyverse)
+library(conflicted)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+conflict_prefer("summarise", "dplyr")
+conflict_prefer("mutate", "dplyr")
+conflict_prefer("rename", "dplyr")
+
+library(vegan)
+library(ggpubr)
+library(patchwork)
+library(ggrepel)
+library(broom)
+library(lme4)
+library(emmeans)
+library(multcompView)
+library(ggforce)
+library(mvabund)
+library(cluster)
+library(indicspecies)
+library(officer)
+library(broom.mixed)
+
+theme_set(theme_classic(base_size = 11))
+set.seed(123)
+
+# ===== Small helpers =====
+data_summary <- function(data, var, groups){
+  data |>
+    group_by(across(all_of(groups))) |>
+    summarise(
+      mean = mean(.data[[var]], na.rm = TRUE),
+      se   = sd(.data[[var]], na.rm = TRUE)/sqrt(n()),
+      .groups = "drop"
+    ) |>
+    rename(!!var := mean)
+}
+
+make_pa <- function(mat) { as_tibble((mat > 0) * 1) }
+
+richness_evenness <- function(comm){
+  r <- rowSums(comm > 0)
+  H <- diversity(comm, index = "shannon")
+  tibble(richness = r, shannon = H, evenness = H / log(pmax(r, 1)))
+}
+
+cld_letters <- function(emm){
+  suppressMessages(multcomp::cld(emm, Letters = letters, adjust = "tukey")) |>
+    as.data.frame()
+}
+
+# === Helper to export figures ===
+save_plot <- function(plot, filename, width = 10, height = 6, dpi = 300){
+  dir.create(dirname(filename), showWarnings = FALSE, recursive = TRUE)
+  ggsave(filename, plot = plot, width = width, height = height, dpi = dpi, bg = "white")
+}
+
+# === Helper to export tables ===
+save_table_docx <- function(df, filename, title = NULL, subtitle = NULL){
+  dir.create(dirname(filename), showWarnings = FALSE, recursive = TRUE)
+  doc <- officer::read_docx()
+
+  if(!is.null(title)) {
+    doc <- officer::body_add_par(doc, title, style = "heading 1")
+  }
+  if(!is.null(subtitle)) {
+    doc <- officer::body_add_par(doc, subtitle, style = "Normal")
+  }
+
+  # Add the table with no style argument (uses default table layout)
+  doc <- officer::body_add_table(doc, df)
+
+  print(doc, target = filename)
+}
+```
+
+## Data import and preparation
+
+```{r data}
+macro <- readr::read_csv(
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vT0crPidVYOXSv8UQKNcz7FDj7_wEhQK3kCVuyj3iphy4KQzzog-PiyMi9RMJHceA/pub?gid=1733927795&single=true&output=csv",
+  show_col_types = FALSE, guess_max = 1e5
+)
+
+traits <- readr::read_csv(
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vT0crPidVYOXSv8UQKNcz7FDj7_wEhQK3kCVuyj3iphy4KQzzog-PiyMi9RMJHceA/pub?gid=1305605473&single=true&output=csv",
+  show_col_types = FALSE
+)
+
+df_meta <- macro |>
+  select(site, treatments, salinity, nutrients, sample_code, chlorophyll_a:phosphates)
+
+comm_raw <- macro %>%
+  select(-site, -treatments, -salinity, -nutrients, -sample_code, -(chlorophyll_a:phosphates)) %>%
+  replace(is.na(.), 0) %>%
+  select(where(~ sum(.x, na.rm = TRUE) > 0)) %>%
+  as_tibble()
+
+df_env <- df_meta |> select(chlorophyll_a:phosphates)
+
+df_meta <- df_meta |>
+  mutate(
+    salinity = factor(salinity,
+                      levels = c("amb_sal", "low_salinity", "high_sal"),
+                      labels = c("Ambient", "Low", "High")),
+    nutrients = factor(nutrients,
+                       levels = c("amb_nut", "high_nut"),
+                       labels = c("Ambient", "High")),
+    site = factor(site, levels = c("Toledo", "Evora", "Porto", "Jaca"))
+  )
+
+comm_log <- comm_raw |> mutate(across(everything(), ~ log1p(.x)))
+comm_pa  <- as_tibble((as.matrix(comm_raw) > 0) * 1)
+```
+
+## Diversity (univariate) and LMMs
+
+```{r diversity}
+div_df <- bind_cols(
+  richness_evenness(comm_raw),
+  total = rowSums(comm_raw)
+) |>
+  bind_cols(df_meta)
+
+m_rich <- lmer(richness ~ salinity * nutrients + (1|site), data = div_df)
+
+emm_rich <- emmeans(m_rich, ~ salinity)
+lab_global <- cld_letters(emm_rich) |> select(salinity, .group)
+
+lab_site <- div_df |>
+  group_split(site) |>
+  map_dfr(function(d){
+    m <- lm(richness ~ salinity, data = d)
+    out <- tryCatch(cld_letters(emmeans(m, ~ salinity)) |> as_tibble(),
+                    error = function(e) tibble())
+    if(nrow(out)) out$site <- unique(d$site)
+    out
+  }) |>
+  select(site, salinity, .group)
+
+p_rich_all <- ggplot(div_df, aes(salinity, richness, fill = salinity)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.15, height = 0, alpha = 0.6) +
+  scale_fill_viridis_d(name = "Salinity") +
+  labs(x = "Salinity treatment", y = "Taxonomic richness",
+       title = "Richness by salinity (all sites)") +
+  geom_text(data = lab_global,
+            aes(y = max(div_df$richness, na.rm = TRUE) + 2, label = .group),
+            vjust = 0, fontface = "bold") +
+  theme(legend.position = "none")
+
+p_rich_site <- ggplot(div_df, aes(salinity, richness, fill = salinity)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.15, height = 0, alpha = 0.6) +
+  facet_wrap(~ site) +
+  scale_fill_viridis_d(name = "Salinity") +
+  labs(x = "Salinity treatment", y = "Taxonomic richness",
+       title = "Richness by salinity (per site)") +
+  geom_text(data = lab_site,
+            aes(y = max(div_df$richness, na.rm = TRUE) + 2, label = .group),
+            vjust = 0, fontface = "bold") +
+  theme(legend.position = "none")
+
+fig2 <- p_rich_all + p_rich_site + plot_layout(widths = c(1, 2))
+save_plot(fig2, "figures/Fig2_Richness.png")
+
+tab_rich <- broom.mixed::tidy(m_rich)
+
+save_table_docx(tab_rich, "tables/Table2_Richness.docx",
+                title = "Table 2. Mixed-effects model for taxonomic richness",
+                subtitle = "LMM results for richness as a function of salinity, nutrients, and site (random effect).")
+```
+
+## NMDS (no clustering) — all sites & by site
+
+```{r nmds}
+ord <- metaMDS(comm = comm_log, distance = "bray", k = 2, trymax = 1000, autotransform = FALSE)
+
+scores_df <- as_tibble(ord$points[,1:2], .name_repair = ~ c("MDS1","MDS2")) |>
+  bind_cols(df_meta)
+
+p_global <- ggplot(scores_df, aes(MDS1, MDS2, color = salinity)) +
+  geom_point(size = 2, alpha = 0.9) +
+  stat_ellipse(aes(group = salinity), linetype = "dashed", level = 0.95) +
+  scale_color_viridis_d(name = "Salinity") +
+  labs(title = "NMDS (Bray–Curtis) — global") +
+  theme(panel.border = element_rect(colour = "black", fill = NA))
+
+p_site <- ggplot(scores_df, aes(MDS1, MDS2, color = salinity)) +
+  geom_point(size = 2, alpha = 0.9) +
+  stat_ellipse(aes(group = salinity), linetype = "dashed", level = 0.95) +
+  facet_wrap(~ site, ncol = 2) +
+  scale_color_viridis_d(name = "Salinity") +
+  labs(title = "NMDS (Bray–Curtis) — by site") +
+  theme(panel.border = element_rect(colour = "black", fill = NA))
+
+fig1 <- p_global + p_site + plot_layout(widths = c(1, 2))
+save_plot(fig1, "figures/Fig1_NMDS.png")
+```
+
+## Multivariate dispersion & PERMANOVA
+
+```{r perm}
+bray <- vegdist(comm_log, method = "bray")
+
+bd_site  <- betadisper(bray, df_meta$site)
+bd_sal   <- betadisper(bray, df_meta$salinity)
+
+disp_site <- permutest(bd_site)
+disp_sal  <- permutest(bd_sal)
+
+perm <- adonis2(bray ~ site * salinity * nutrients, data = df_meta, permutations = 999)
+
+perm_df <- broom::tidy(perm)
+save_table_docx(perm_df, "tables/Table1_PERMANOVA.docx",
+                title = "Table 1. PERMANOVA results",
+                subtitle = "Effects of site, salinity, and nutrients on community composition.")
+```
+
+## Distance-based RDA (dbRDA) with stepwise selection
+
+```{r dbRDA}
+comm_hel <- decostand(comm_raw, method = "hellinger")
+full <- dbrda(comm_hel ~ ., data = df_env, distance = "bray")
+
+step_mod <- ordistep(
+  dbrda(comm_hel ~ 1, data = df_env, distance = "bray"),
+  scope = formula(full), direction = "both", permutations = 999
+)
+best <- dbrda(formula(step_mod), data = df_env, distance = "bray")
+
+imp <- summary(best)$cont$importance
+ax1 <- round(imp[2,1]*100, 1)
+ax2 <- round(imp[2,2]*100, 1)
+
+site_sc <- scores(best, display = "sites") |> as.data.frame() |> as_tibble() |> bind_cols(df_meta |> select(salinity))
+bp_sc <- scores(best, display = "bp") |> as.data.frame() |> as_tibble(rownames = "variable")
+
+fig3 <- ggplot(site_sc, aes(dbRDA1, dbRDA2, color = salinity)) +
+  geom_point(size = 2.4, alpha = 0.9) +
+  stat_ellipse(aes(group = salinity), linetype = "dashed") +
+  geom_segment(data = bp_sc, inherit.aes = FALSE,
+               aes(x = 0, y = 0, xend = dbRDA1*1.8, yend = dbRDA2*1.8),
+               arrow = arrow(length = unit(0.18, "in")), color = "red") +
+  geom_text_repel(data = bp_sc, inherit.aes = FALSE,
+                  aes(x = dbRDA1*1.8, y = dbRDA2*1.8, label = variable),
+                  color = "red", size = 3.4) +
+  scale_color_viridis_d(name = "Salinity") +
+  labs(x = paste0("dbRDA1 (", ax1, "%)"),
+       y = paste0("dbRDA2 (", ax2, "%)"),
+       title = "dbRDA (Bray–Curtis) — reduced model with biplot vectors") +
+  theme(panel.border = element_rect(colour = "black", fill = NA))
+save_plot(fig3, "figures/Fig3_dbRDA.png")
+
+# Stepwise dbRDA selection table (from your ordistep output; edit values if re-runs differ)
+db_table <- data.frame(
+  Variable = c("Conductivity","pH","Phosphates","Initial conductivity",
+               "Oxygen","Chlorophyll a","Nitrites"),
+  Df = 1,
+  AIC = c(277.55,271.53,270.12,272.36,272.42,272.70,272.82),
+  F = c(18.08,8.11,3.32,1.13,1.07,0.80,0.68),
+  P = c(0.001,0.001,0.010,0.33,0.39,0.56,0.67)
+)
+save_table_docx(db_table, "tables/Table3_dbRDA.docx",
+                title = "Table 3. Stepwise dbRDA selection of environmental variables",
+                subtitle = "Significant variables retained in the final dbRDA model.")
+```
+
+## Indicator taxa (ANOVA-based significant taxa)
+
+```{r ind}
+taxa_p <- apply(comm_log, 2, function(y) {
+  model <- aov(y ~ df_meta$salinity)
+  summary(model)[[1]][["Pr(>F)"]][1]
+})
+
+taxa_p <- tibble(taxon = names(taxa_p), p_value = taxa_p) %>%
+  filter(!is.na(p_value) & p_value < 0.05)
+
+sig_taxa <- taxa_p$taxon
+print(sig_taxa)
+
+if (length(sig_taxa)) {
+  df_sel <- comm_log %>%
+    select(all_of(sig_taxa)) %>%
+    mutate(site = df_meta$site, salinity = df_meta$salinity) %>%
+    pivot_longer(-c(site, salinity), names_to = "taxon", values_to = "abundance")
+
+  fig5 <- ggplot(df_sel, aes(salinity, abundance, fill = salinity)) +
+    geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+    geom_jitter(width = 0.15, alpha = 0.6) +
+    facet_wrap(~ taxon, scales = "free_y") +
+    scale_fill_viridis_d() +
+    labs(x = "Salinity", y = "log1p(Abundance)",
+         title = "Significant taxa by salinity (p < 0.05)") +
+    theme(legend.position = "none")
+
+  save_plot(fig5, "figures/Fig5_Indicators.png")
+}
+
+save_table_docx(taxa_p, "tables/Table4_Indicators.docx",
+                title = "Table 4. Significant taxa associated with salinity levels",
+                subtitle = "Results from univariate ANOVA per taxon (p < 0.05).")
+```
+
+## Major groups — univariate (top 4 groups)
+
+```{r groups}
+groups_salinization <- readr::read_delim(
+  "data/groups_salinization.csv", delim = ";",
+  escape_double = FALSE, trim_ws = TRUE, show_col_types = FALSE
+)
+
+groups_salinization <- groups_salinization |>
+  mutate(
+    salinity = factor(salinity,
+                      levels = c("amb_sal","low_salinity","high_sal"),
+                      labels = c("Ambient","Low","High")),
+    site = factor(site, levels = c("Toledo","Evora","Porto","Jaca"))
+  )
+
+grp_totals <- groups_salinization |>
+  select(-(sample_code2:site)) |>
+  summarise(across(everything(), ~ sum(.x, na.rm = TRUE))) |>
+  pivot_longer(everything(), names_to = "group", values_to = "total") |>
+  arrange(desc(total)) |>
+  slice_head(n = 4)
+
+top_groups <- grp_totals$group
+
+df_long <- groups_salinization |>
+  select(sample_code2, salinity, site, all_of(top_groups)) |>
+  pivot_longer(all_of(top_groups), names_to = "group", values_to = "abundance") |>
+  mutate(log_abund = log(abundance + 0.01))
+
+m_grp <- lmer(log_abund ~ salinity + (1|site) + (1|group), data = df_long)
+emm_grp <- emmeans(m_grp, ~ salinity)
+lab_grp <- cld_letters(emm_grp) |> select(salinity, .group)
+
+p_all <- ggplot(df_long, aes(salinity, log_abund, fill = salinity)) +
+  geom_boxplot(alpha = 0.7) + geom_jitter(width = 0.15, alpha = 0.5) +
+  facet_wrap(~ group, scales = "free_y") +
+  scale_fill_viridis_d(name = "Salinity") +
+  labs(x = "Salinity", y = "log(Abundance + 0.01)",
+       title = "Top 4 groups — all sites") +
+  geom_text(data = lab_grp,
+            aes(y = max(df_long$log_abund, na.rm = TRUE) + 0.1, label = .group),
+            vjust = 0, fontface = "bold") +
+  theme(legend.position = "none")
+
+p_site <- ggplot(df_long, aes(salinity, log_abund, fill = salinity)) +
+  geom_boxplot(alpha = 0.7) + geom_jitter(width = 0.15, alpha = 0.5) +
+  facet_grid(site ~ group, scales = "free_y") +
+  scale_fill_viridis_d(name = "Salinity") +
+  labs(x = "Salinity", y = "log(Abundance + 0.01)",
+       title = "Top 4 groups — by site") +
+  theme(legend.position = "none")
+
+fig4 <- p_all + p_site + plot_layout(widths = c(1, 2))
+save_plot(fig4, "figures/Fig4_Groups.png")
+```
