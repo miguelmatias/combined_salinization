@@ -22,7 +22,9 @@ library(ggpubr)
 library(patchwork)
 library(ggrepel)
 library(broom)
+library(broom.mixed)
 library(lme4)
+library(lmerTest)
 library(emmeans)
 library(multcompView)
 library(ggforce)
@@ -30,12 +32,10 @@ library(mvabund)
 library(cluster)
 library(indicspecies)
 library(officer)
-library(broom.mixed)
-library(lme4)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(lmerTest)
+library(stringr)
+library(parallel)
+library(cowplot)
+library(janitor)
 
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
@@ -45,6 +45,27 @@ conflict_prefer("rename", "dplyr")
 
 theme_set(theme_classic(base_size = 11))
 set.seed(123)
+
+# ===== Color palettes =====
+# Six-treatment palette
+salinity_cols2 <- c(
+  "ASAN" = "#8DD3C7",  # soft aqua (low salinity)
+  "ASEN" = "#4DBBD5",  # teal
+  "MSAN" = "#1F78B4",  # blue
+  "MSEN" = "#A6CEE3",  # light blue-grey
+  "HSAN" = "#FDBF6F",  # warm light orange
+  "HSEN" = "#E66101"   # strong orange (high salinity)
+)
+
+# Three-level salinity palette (first, third, and fifth colors)
+salinity_palette <- c(
+  "Ambient" = salinity_cols2["ASAN"],
+  "Low"     = salinity_cols2["MSAN"],
+  "High"    = salinity_cols2["HSAN"]
+)
+
+# Alias for six-treatment palette
+treatment_palette <- salinity_cols2
 
 # ===== Small helpers =====
 data_summary <- function(data, var, groups){
@@ -103,10 +124,6 @@ save_table_docx <- function(df, filename, title = NULL, subtitle = NULL){
 ############################################################
 ##########   FULL MACRO DATA + TAXONOMY PIPELINE   #########
 ############################################################
-
-library(tidyverse)
-library(stringr)
-library(broom)
 
 set.seed(123)
 
@@ -333,8 +350,6 @@ macro_by_ffg <- macro_long %>%
 
 ### Bacteria
 ```{r}
-library(tidyverse)
-
 # ==============================================================
 # 1. Load bacterial data and metadata
 # ==============================================================
@@ -487,18 +502,11 @@ lab_site <- div_df %>%
   }) %>%
   select(site, salinity, .group)
 
-# --- Custom palette (three-level salinity scale) ---
-treatment_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
-
 # --- Main figure: salinity effects ---
 p_rich_all <- ggplot(div_df, aes(salinity, richness, fill = salinity)) +
   geom_boxplot(alpha = 0.85, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
-  scale_fill_manual(values = treatment_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette, name = "Salinity") +
   labs(
     x = "Salinity treatment",
     y = "Taxonomic richness",
@@ -578,16 +586,6 @@ m_rich_treat <- lmertest::lmer(richness ~ treatment + (1 | site), data = div_df)
 # --- Post-hoc comparisons among treatments ---
 emm_treat <- emmeans(m_rich_treat, ~ treatment)
 lab_treat <- cld_letters(emm_treat) %>% select(treatment, .group)
-
-# --- Custom palette (nomenclature consistent colors) ---
-treatment_palette <- c(
-  "ASAN" = "#9BDCFD",  # light blue
-  "ASEN" = "#0072B2",  # dark blue
-  "MSAN" = "#FFD700",  # yellow
-  "MSEN" = "#A0522D",  # brown
-  "HSAN" = "#FF69B4",  # pink
-  "HSEN" = "#D73027"   # red
-)
 
 # --- Supplementary figure ---
 # --- Cleaned first panel (no subtitle text inside figure) ---
@@ -723,13 +721,6 @@ lab_bact_site <- bact_div_df %>%
   }) %>%
   select(Site, salinity, .group)
 
-# --- Custom palette (three-level salinity scale) ---
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
-
 # ==============================================================
 # (A) Salinity effects – all sites
 # ==============================================================
@@ -824,16 +815,6 @@ m_bact_rich_treat <- lmer(richness ~ treatment + (1 | Site), data = bact_div_df)
 emm_bact_treat <- emmeans(m_bact_rich_treat, ~ treatment)
 lab_bact_treat <- cld_letters(emm_bact_treat) %>% select(treatment, .group)
 
-# --- Custom palette (six-level treatment colors) ---
-treatment_palette <- c(
-  "ASAN" = "#9BDCFD",  # light blue
-  "ASEN" = "#0072B2",  # dark blue
-  "MSAN" = "#FFD700",  # yellow
-  "MSEN" = "#A0522D",  # brown
-  "HSAN" = "#FF69B4",  # pink
-  "HSEN" = "#D73027"   # red
-)
-
 # ==============================================================
 # SUPPLEMENTARY FIGURE – SIX TREATMENTS
 # ==============================================================
@@ -906,12 +887,6 @@ save_table_docx(
 # BACTERIA vs MACROINVERTEBRATES — Richness comparison (Salinity only)
 # ==============================================================
 
-library(lme4)
-library(emmeans)
-library(multcompView)
-library(ggplot2)
-library(patchwork)
-
 # ---- 1. Compute bacterial richness (univariate) ----
 bact_div_df <- bind_cols(
   richness_evenness(comm_bacteria %>% select(-sample_code)),
@@ -925,13 +900,6 @@ m_bact_rich <- lmer(richness ~ salinity * nutrients + (1 | Site), data = bact_di
 # ---- 3. Post-hoc (salinity main effect) ----
 emm_bact_rich <- emmeans(m_bact_rich, ~ salinity)
 lab_bact_global <- cld_letters(emm_bact_rich) %>% select(salinity, .group)
-
-# ---- 4. Palette (3-level salinity) ----
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
 
 # ---- 5. Create bacterial plot ----
 p_bact_rich_all <- ggplot(bact_div_df, aes(salinity, richness, fill = salinity)) +
@@ -990,12 +958,6 @@ ggsave(
 # BACTERIA vs MACROINVERTEBRATES — Richness comparison (six treatments)
 # ==============================================================
 
-library(ggplot2)
-library(patchwork)
-library(lme4)
-library(emmeans)
-library(multcompView)
-
 # ---- 1. Compute bacterial richness ----
 bact_div_df <- bind_cols(
   richness_evenness(comm_bacteria %>% select(-sample_code)),
@@ -1020,16 +982,6 @@ m_bact_rich_treat <- lmer(richness ~ treatment + (1 | Site), data = bact_div_df)
 
 emm_bact_treat <- emmeans(m_bact_rich_treat, ~ treatment)
 lab_bact_treat <- cld_letters(emm_bact_treat) %>% select(treatment, .group)
-
-# ---- 3. Palette (same as macroinvertebrates) ----
-treatment_palette <- c(
-  "ASAN" = "#9BDCFD",  # Ambient Salinity + Ambient Nutrients
-  "ASEN" = "#0072B2",  # Ambient Salinity + Enriched Nutrients
-  "MSAN" = "#FFD700",  # Moderate Salinity + Ambient Nutrients
-  "MSEN" = "#A0522D",  # Moderate Salinity + Enriched Nutrients
-  "HSAN" = "#FF69B4",  # High Salinity + Ambient Nutrients
-  "HSEN" = "#D73027"   # High Salinity + Enriched Nutrients
-)
 
 # ---- 4. Bacterial richness plot ----
 p_bact_rich_all_treat <- ggplot(bact_div_df, aes(treatment, richness, fill = treatment)) +
@@ -1089,9 +1041,6 @@ ggsave(
 # MULTI COMBO — BACTERIA vs MACRO (Salinity + Full treatments)
 # ==============================================================
 
-library(patchwork)
-library(ggplot2)
-
 figB6_multi_combo <- (figB5_bact_macro | figB4_bact_macro) +
   plot_layout(guides = "collect", widths = c(1,2)) &
   theme(
@@ -1143,13 +1092,6 @@ scores_df <- as_tibble(ord$points[, 1:2], .name_repair = ~ c("MDS1", "MDS2")) %>
 # ======================================================
 # FIGURE 1: Salinity effects (three-color palette)
 # ======================================================
-
-# --- Custom 3-color palette ---
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
 
 # --- Global NMDS ---
 p_global <- ggplot(scores_df, aes(MDS1, MDS2, color = salinity)) +
@@ -1221,16 +1163,6 @@ scores_df <- scores_df %>%
     treatment = factor(treatment, levels = c("ASAN","ASEN","MSAN","MSEN","HSAN","HSEN"))
   )
 
-# --- Custom 6-treatment palette ---
-treatment_palette <- c(
-  "ASAN" = "#9BDCFD",  # light blue
-  "ASEN" = "#0072B2",  # dark blue
-  "MSAN" = "#FFD700",  # yellow
-  "MSEN" = "#A0522D",  # brown
-  "HSAN" = "#FF69B4",  # pink
-  "HSEN" = "#D73027"   # red
-)
-
 # --- Global NMDS (six treatments) ---
 p_global_treat <- ggplot(scores_df, aes(MDS1, MDS2, color = treatment)) +
   geom_point(size = 2.3, alpha = 0.9) +
@@ -1291,10 +1223,6 @@ ggsave(
 # BACTERIA — NMDS ORDINATION (Bray–Curtis)
 # ==============================================================
 
-library(vegan)
-library(ggplot2)
-library(patchwork)
-
 # --- Compute ordination (Bray–Curtis distance) ---
 ord_bact <- metaMDS(comm = comm_bacteria %>% select(-sample_code),
                     distance = "bray", k = 2, trymax = 1000, autotransform = FALSE)
@@ -1307,12 +1235,6 @@ scores_bact <- as_tibble(ord_bact$points[, 1:2],
 # ==============================================================
 # FIGURE B2: Salinity effects (three-color palette)
 # ==============================================================
-
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
 
 # --- Global NMDS ---
 p_bact_global <- ggplot(scores_bact, aes(MDS1, MDS2, color = salinity)) +
@@ -1387,16 +1309,6 @@ scores_bact <- scores_bact %>%
     treatment = factor(treatment,
                        levels = c("ASAN","ASEN","MSAN","MSEN","HSAN","HSEN"))
   )
-
-# --- Custom 6-treatment palette ---
-treatment_palette <- c(
-  "ASAN" = "#9BDCFD",  # light blue
-  "ASEN" = "#0072B2",  # dark blue
-  "MSAN" = "#FFD700",  # yellow
-  "MSEN" = "#A0522D",  # brown
-  "HSAN" = "#FF69B4",  # pink
-  "HSEN" = "#D73027"   # red
-)
 
 # --- Global NMDS (six treatments) ---
 p_bact_global_treat <- ggplot(scores_bact, aes(MDS1, MDS2, color = treatment)) +
@@ -1482,12 +1394,6 @@ save_table_docx(perm_df, "tables/Table1_PERMANOVA.docx",
 
 ```{r dbrda}
 
-library(vegan)
-library(ggrepel)
-library(patchwork)
-library(dplyr)
-library(tibble)
-
 # --- Hellinger-transform community data ---
 comm_hel <- decostand(comm_raw, method = "hellinger")
 
@@ -1508,13 +1414,6 @@ fit_env_scores <- scores(fit_env, display = "vectors") %>%
 pca_imp <- summary(env_pca)$cont$importance
 pca_ax1 <- round(pca_imp[2, 1] * 100, 1)
 pca_ax2 <- round(pca_imp[2, 2] * 100, 1)
-
-# --- Custom 3-colour salinity palette ---
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
 
 # --- PCA plot (Panel A) ---
 pca_plot <- ggplot(env_scores, aes(PC1, PC2, color = salinity)) +
@@ -1612,15 +1511,21 @@ ggsave(
   bg = "white"
 )
 
+# --- Export dbRDA results table ---
+tab_dbrda <- broom::tidy(anova(best, by = "terms", permutations = 999))
+save_table_docx(
+  tab_dbrda,
+  "tables/Table3_dbRDA.docx",
+  title = "Table 3. Distance-based redundancy analysis (dbRDA) results",
+  subtitle = "dbRDA results showing environmental variables explaining community composition variation."
+)
+
 ```
 
 
 ### Bacteria
 
 ```{r}
-
-library(vegan)
-library(broom)
 
 # --- Compute Bray–Curtis distance matrix ---
 bray_bact <- vegdist(comm_bacteria %>% select(-sample_code), method = "bray")
@@ -1663,12 +1568,6 @@ perm_bact_df
 
 ```{r}
 
-library(vegan)
-library(ggrepel)
-library(patchwork)
-library(dplyr)
-library(tibble)
-
 # ---- 0) Filter metadata and community for T0 only ----
 meta_bact_T0 <- df_bacteria_metadata %>%
   filter(Sample_Point == "T0")
@@ -1710,13 +1609,6 @@ fit_env_scores_b <- scores(fit_env_b, display = "vectors") %>%
 pca_imp_b <- summary(env_pca_b)$cont$importance
 pca_ax1_b <- round(pca_imp_b[2, 1] * 100, 1)
 pca_ax2_b <- round(pca_imp_b[2, 2] * 100, 1)
-
-# Palette
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",
-  "Low"     = "#FFD700",
-  "High"    = "#D73027"
-)
 
 # ---- 3) PCA plot (Panel A) ----
 pca_plot_b <- ggplot(env_scores_b, aes(PC1, PC2, color = salinity)) +
@@ -1820,8 +1712,6 @@ db_plot     <- db_plot     + labs(title = "Macroinvert. – Community compositio
 pca_plot_b  <- pca_plot_b  + labs(title = "Bacteria – Environmental variables (PCA)")
 db_plot_b   <- db_plot_b   + labs(title = "Bacteria – Community composition (dbRDA)")
 
-library(patchwork)
-
 figB7 <- (pca_plot + db_plot) /
          (pca_plot_b + db_plot_b) +
   plot_layout(guides = "collect") +
@@ -1865,13 +1755,6 @@ taxa_p <- tibble(taxon = names(taxa_p), p_value = taxa_p) %>%
 
 sig_taxa <- taxa_p$taxon
 print(sig_taxa)
-
-# --- Custom salinity palette (3 colours) ---
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
 
 # --- Main Figure 5: salinity-level indicator taxa ---
 if (length(sig_taxa)) {
@@ -1934,16 +1817,6 @@ df_meta <- df_meta %>%
     ),
     treatment = factor(treatment, levels = c("ASAN","ASEN","MSAN","MSEN","HSAN","HSEN"))
   )
-
-# --- Custom palette for six treatments ---
-treatment_palette <- c(
-  "ASAN" = "#9BDCFD",  # light blue
-  "ASEN" = "#0072B2",  # dark blue
-  "MSAN" = "#FFD700",  # yellow
-  "MSEN" = "#A0522D",  # brown
-  "HSAN" = "#FF69B4",  # pink
-  "HSEN" = "#D73027"   # red
-)
 
 # --- ANOVA per treatment (expanded) ---
 taxa_p_treat <- apply(comm_log, 2, function(y) {
@@ -2008,14 +1881,6 @@ save_table_docx(
 
 ```{r}
 
-library(tidyverse)
-library(lme4)
-library(emmeans)
-library(multcompView)
-library(patchwork)
-library(ggrepel)
-library(cowplot)
-
 # --- Load data ---
 groups_salinization <- readr::read_delim(
   "data/groups_salinization.csv", delim = ";",
@@ -2051,13 +1916,6 @@ df_long <- groups_salinization %>%
 m_grp <- lmer(log_abund ~ salinity + (1|site) + (1|group), data = df_long)
 emm_grp <- emmeans(m_grp, ~ salinity)
 lab_grp <- cld_letters(emm_grp) %>% select(salinity, .group)
-
-# --- 3-colour palette ---
-salinity_palette <- c(
-  "Ambient" = "#9BDCFD",  # light blue
-  "Low"     = "#FFD700",  # yellow
-  "High"    = "#D73027"   # red
-)
 
 # --- Panel A: all sites ---
 p_all <- ggplot(df_long, aes(salinity, log_abund, fill = salinity)) +
@@ -2101,17 +1959,13 @@ fig4
 
 # --- Save model results ---
 tab_grp <- broom.mixed::tidy(m_grp)
-save_table_docx(tab_grp, "tables/Table4_Groups.docx",
-                title = "Table 4. Mixed-effects model for top four taxonomic groups",
+save_table_docx(tab_grp, "tables/Table5_Groups.docx",
+                title = "Table 5. Mixed-effects model for top four taxonomic groups",
                 subtitle = "LMM results for log-transformed abundances as a function of salinity, with site and group as random effects.")
 
 # ==========================================================
 # Supplementary Figure S4 – Top 4 major groups (six treatments)
 # ==========================================================
-
-library(tidyverse)
-library(patchwork)
-library(ggforce)
 
 # --- Load data ---
 groups_salinization <- readr::read_delim(
@@ -2150,16 +2004,6 @@ df_long <- groups_salinization %>%
   select(site, treatment, all_of(top_groups)) %>%
   pivot_longer(all_of(top_groups), names_to = "group", values_to = "abundance") %>%
   mutate(log_abund = log(abundance + 0.01))
-
-# --- Six-treatment colour palette ---
-treatment_palette <- c(
-  "ASAN" = "#9BDCFD",   # Ambient Salinity + Ambient Nutrients (light blue)
-  "ASEN" = "#004D99",   # Ambient Salinity + Enriched Nutrients (dark blue)
-  "MSAN" = "#FFD700",   # Moderate Salinity + Ambient Nutrients (yellow)
-  "MSEN" = "#A67C52",   # Moderate Salinity + Enriched Nutrients (brown)
-  "HSAN" = "#F4A7B9",   # High Salinity + Ambient Nutrients (pink)
-  "HSEN" = "#D73027"    # High Salinity + Enriched Nutrients (red)
-)
 
 # --- (A) All sites combined ---
 p_all_treat <- ggplot(df_long, aes(treatment, log_abund, fill = treatment)) +
@@ -2224,8 +2068,6 @@ macro_long <- comm_log %>%
     names_to = "taxon",
     values_to = "abundance"
   )
-
-library(broom)
 
 macro_lm_results <- macro_long %>%
   group_by(taxon) %>%
@@ -2309,8 +2151,6 @@ macro_long_ordered <- macro_long %>%
 macro_by_order <- macro_long_ordered %>%
   group_by(sample, salinity, Order) %>%
   summarise(abundance = sum(abundance), .groups = "drop")
-
-library(broom)
 
 macro_order_lm <- macro_by_order %>%
   group_by(Order) %>%
@@ -2438,8 +2278,6 @@ names(aggregated_taxa) <- tax_levels
 # ==============================================================
 # 9. Helper: fit GLMM for salinity response per taxon
 # ==============================================================
-library(parallel)
-library(broom.mixed)
 
 model_tax_salinity <- function(df_level, tax_level){
   df_level %>%
