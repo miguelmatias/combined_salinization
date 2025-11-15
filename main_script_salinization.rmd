@@ -96,8 +96,9 @@ save_table_docx <- function(df, filename, title = NULL, subtitle = NULL){
 }
 ```
 
-# Data import and preparation
-## MACRO
+## Data import and preparation
+
+### Macroinvertebrates
 ```{r data}
 ############################################################
 ##########   FULL MACRO DATA + TAXONOMY PIPELINE   #########
@@ -330,7 +331,7 @@ macro_by_ffg <- macro_long %>%
 
 ```
 
-##BACTERIA
+### Bacteria
 ```{r}
 library(tidyverse)
 
@@ -455,12 +456,11 @@ stopifnot(identical(comm_bacteria$sample_code, df_bacteria_metadata$sample_code)
 cat("✅ Final matched and sampled cases:", length(shared_codes), "\n")
 ```
 
-# Diversity (univariate) and LMMs
-## MACRO
-```{r diversity, fig.width=11, fig.asp=0.6}
-
 ## Diversity (univariate) and LMMs
-### Salinization as a whole
+
+### Macroinvertebrates
+
+```{r diversity, fig.width=11, fig.asp=0.6}
 
 # --- Data prep ---
 div_df <- bind_cols(
@@ -657,7 +657,8 @@ save_table_docx(
 )
 ```
 
-## BACTERIA
+### Bacteria
+
 ```{r}
 # ==============================================================
 # Define final bacterial datasets (n = 139)
@@ -897,7 +898,8 @@ save_table_docx(
 )
 
 ```
-## COMBO
+### Combined analysis
+
 ```{r}
 
 # ==============================================================
@@ -1126,11 +1128,11 @@ ggsave(
 
 
 
-# NMDS (no clustering) — all sites & by site
-### MACRO
+## NMDS ordination
+
+### Macroinvertebrates
+
 ```{r nmds}
-## NMDS ordination (Bray–Curtis)
-# ==============================
 
 # --- Compute ordination ---
 ord <- metaMDS(comm = comm_log, distance = "bray", k = 2, trymax = 1000, autotransform = FALSE)
@@ -1283,7 +1285,7 @@ ggsave(
 
 ```
 
-### BACTERIAS
+### Bacteria
 ```{r}
 # ==============================================================
 # BACTERIA — NMDS ORDINATION (Bray–Curtis)
@@ -1455,7 +1457,9 @@ ggsave(
 
 
 
-# Multivariate dispersion & PERMANOVA
+## Multivariate dispersion and PERMANOVA
+
+### Macroinvertebrates
 
 ```{r perm}
 bray <- vegdist(comm_log, method = "bray")
@@ -1473,10 +1477,10 @@ save_table_docx(perm_df, "tables/Table1_PERMANOVA.docx",
                 title = "Table 1. PERMANOVA results",
                 subtitle = "Effects of site, salinity, and nutrients on community composition.")
 ```
-```{r dbrda}
 
-## PCA (Panel A) + dbRDA (Panel B) with envfit vectors and common legend
-# =====================================================================
+### PCA and dbRDA
+
+```{r dbrda}
 
 library(vegan)
 library(ggrepel)
@@ -1612,10 +1616,8 @@ ggsave(
 
 
 ### Bacteria
+
 ```{r}
-# ==============================================================
-# BACTERIA — Multivariate dispersion & PERMANOVA
-# ==============================================================
 
 library(vegan)
 library(broom)
@@ -1657,10 +1659,9 @@ perm_bact_df
 
 ```
 
+### PCA and dbRDA
+
 ```{r}
-# ==============================================================
-# BACTERIA — PCA (env) + dbRDA (community) using only T0 samples
-# ==============================================================
 
 library(vegan)
 library(ggrepel)
@@ -1811,7 +1812,8 @@ ggsave(
 
 ```
 
-## COMBO
+### Combined analysis
+
 ```{r fig.width=12, fig.asp=1}
 pca_plot    <- pca_plot    + labs(title = "Macroinvert. – Environmental variables (PCA)")
 db_plot     <- db_plot     + labs(title = "Macroinvert. – Community composition (dbRDA)")
@@ -1846,11 +1848,11 @@ ggsave(
 )
 ```
 
-# INDICATORS
-## MACRO Indicator taxa (ANOVA-based significant taxa)
+## Indicator taxa analysis
+
+### Macroinvertebrates
+
 ```{r ind}
-## Indicator taxa (ANOVA-based significant taxa)
-# ==============================================
 
 # --- Identify taxa significantly affected by salinity ---
 taxa_p <- apply(comm_log, 2, function(y) {
@@ -2002,10 +2004,9 @@ save_table_docx(
 
 ```
 
-```{r}
+### Major groups
 
-## Major groups — univariate (top 4 groups)
-# =========================================
+```{r}
 
 library(tidyverse)
 library(lme4)
@@ -2206,10 +2207,9 @@ ggsave(
 )
 
 ```
+### Macroinvertebrate indicator taxa (GLMM-based)
+
 ```{r}
-## ============================================================
-## MACROINVERTEBRATE INDICATOR TAXA (GLMM-based, bacteria-style)
-## ============================================================
 
 # --------------------------
 # 1. Prepare macro long data
@@ -2268,11 +2268,9 @@ ggplot(macro_indicators,
   ))
 ```
 
-## Indicators at family level
+### Indicators at family level
+
 ```{r}
-############################################################
-# 10. DIRECTIONAL EFFECT MODELS (LM per grouping)
-############################################################
 
 get_effects <- function(df, group_var) {
   df %>%
@@ -2352,7 +2350,8 @@ ggplot(macro_order_indicators,
 ```
 
 
-## Indicators at functional group level
+### Indicators at functional group level
+
 ```{r}
 macro_ffg_abund <- macro_long %>%
   left_join(macro_ffg, by="taxon") %>%
@@ -2494,11 +2493,9 @@ combined_winners_losers <- bind_rows(
 View(combined_winners_losers)
 ```
 
-## BACTERIA
+### Bacteria
+
 ```{r fig.width=14}
-# ==============================================================
-# Indicator taxa at Phylum level
-# ==============================================================
 
 phylum_abund <- aggregated_taxa$tax_phylum
 phylum_mod   <- model_results$tax_phylum
@@ -2549,9 +2546,6 @@ ggplot(phylum_abund,
 
 
 ```{r fig.width=14}
-# ==============================================================
-# Ecological Phylum Group Mapping (UPDATED + COMPLETE)
-# ==============================================================
 
 phylum_groups <- tribble(
   ~original,                  ~group,
