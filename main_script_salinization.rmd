@@ -581,7 +581,7 @@ div_df <- div_df %>%
   )
 
 # --- Mixed model for full factorial ---
-m_rich_treat <- lmertest::lmer(richness ~ treatment + (1 | site), data = div_df)
+m_rich_treat <- lmerTest::lmer(richness ~ treatment + (1 | site), data = div_df)
 
 # --- Post-hoc comparisons among treatments ---
 emm_treat <- emmeans(m_rich_treat, ~ treatment)
