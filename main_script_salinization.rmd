@@ -48,7 +48,7 @@ set.seed(123)
 
 # ===== Color palettes =====
 # Six-treatment palette
-salinity_cols2 <- c(
+salinity_palette_6 <- c(
   "ASAN" = "#8DD3C7",  # soft aqua (low salinity)
   "ASEN" = "#4DBBD5",  # teal
   "MSAN" = "#1F78B4",  # blue
@@ -58,14 +58,11 @@ salinity_cols2 <- c(
 )
 
 # Three-level salinity palette (first, third, and fifth colors)
-salinity_palette <- c(
-  "Ambient" = salinity_cols2["ASAN"],
-  "Low"     = salinity_cols2["MSAN"],
-  "High"    = salinity_cols2["HSAN"]
+salinity_palette_3 <- c(
+  "Ambient" = "#8DD3C7",
+  "Low"     = "#1F78B4",
+  "High"    = "#FDBF6F"
 )
-
-# Alias for six-treatment palette
-treatment_palette <- salinity_cols2
 
 # ===== Small helpers =====
 data_summary <- function(data, var, groups){
@@ -371,11 +368,6 @@ df_bacteria_metadata <- df_bacteria_metadata %>%
     sample_code = paste0(Pond, "_", Sample_Point)  # e.g. "EV_HSHN_P1_T0"
   )
 
-# Quick check
-df_bacteria_metadata %>%
-  select(Pond, Sample_Point, sample_code) %>%
-  head()
-
 # ==============================================================
 # 3. Prepare community matrix (bacteria)
 # ==============================================================
@@ -392,9 +384,6 @@ comm_bacteria <- df_bacteria %>%
   rownames_to_column("sample_code") %>%  # column names are the same sample codes as metadata
   as_tibble() %>%
   mutate(across(-sample_code, as.numeric))
-
-# Quick check
-glimpse(comm_bacteria[1:5, 1:6])
 
 # ==============================================================
 # 4. Join metadata and community matrices by sample_code
@@ -486,27 +475,25 @@ div_df <- bind_cols(
 
 # --- Mixed model for richness ---
 m_rich <- lmerTest::lmer(richness ~ salinity * nutrients + (1 | site), data = div_df)
+m_rich
 
 # --- Post-hoc tests (salinity main effect) ---
 emm_rich <- emmeans(m_rich, ~ salinity)
 lab_global <- cld_letters(emm_rich) %>% select(salinity, .group)
 
-lab_site <- div_df %>%
-  group_split(site) %>%
-  map_dfr(function(d){
-    m <- lm(richness ~ salinity, data = d)
-    out <- tryCatch(cld_letters(emmeans(m, ~ salinity)) %>% as_tibble(),
-                    error = function(e) tibble())
-    if(nrow(out)) out$site <- unique(d$site)
-    out
-  }) %>%
-  select(site, salinity, .group)
+# Make sure factors are properly declared
+div_df <- div_df %>%
+  mutate(
+    salinity  = factor(salinity),
+    nutrients = factor(nutrients),
+    region    = factor(site)
+  )
 
 # --- Main figure: salinity effects ---
 p_rich_all <- ggplot(div_df, aes(salinity, richness, fill = salinity)) +
   geom_boxplot(alpha = 0.85, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
-  scale_fill_manual(values = salinity_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = "Salinity treatment",
     y = "Taxonomic richness",
@@ -528,7 +515,7 @@ p_rich_site <- ggplot(div_df, aes(salinity, richness, fill = salinity)) +
   geom_boxplot(alpha = 0.85, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
   facet_wrap(~ site) +
-  scale_fill_manual(values = treatment_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = "Salinity treatment",
     y = "Taxonomic richness",
@@ -592,7 +579,7 @@ lab_treat <- cld_letters(emm_treat) %>% select(treatment, .group)
 p_rich_all_treat <- ggplot(div_df, aes(treatment, richness, fill = treatment)) +
   geom_boxplot(alpha = 0.9, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
-  scale_fill_manual(values = treatment_palette, name = NULL) +   # no legend title
+  scale_fill_manual(values = salinity_palette_6, name = NULL) +   # no legend title
   labs(
     x = "Treatment",
     y = "Taxonomic richness",
@@ -616,7 +603,7 @@ p_rich_site_treat <- ggplot(div_df, aes(treatment, richness, fill = treatment)) 
   geom_boxplot(alpha = 0.9, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
   facet_wrap(~ site) +
-  scale_fill_manual(values = treatment_palette, name = NULL) +
+  scale_fill_manual(values = salinity_palette_6, name = NULL) +
   labs(x = "Treatment", y = "Taxonomic richness", title = "(B) Per site") +
   theme_classic(base_size = 12) +
   theme(
@@ -648,6 +635,7 @@ ggsave("figures/FigS2_Richness.png", plot = figS2, width = 11, height = 5.5, dpi
 figS2
 
 tab_rich_treat <- broom.mixed::tidy(m_rich_treat)
+
 save_table_docx(
   tab_rich_treat, "tables/TableS2_Richness.docx",
   title = "Table S2. Mixed-effects model for taxonomic richness by treatment",
@@ -704,7 +692,7 @@ bact_div_df <- bind_cols(
               select(sample_code, Site, salinity, nutrients, Treatment))
 
 # --- Mixed model for richness ---
-m_bact_rich <- lmer(richness ~ salinity * nutrients + (1 | Site), data = bact_div_df)
+m_bact_rich <- lmerTest::lmer(richness ~ salinity * nutrients + (1 | Site), data = bact_div_df)
 
 # --- Post-hoc tests (salinity main effect) ---
 emm_bact_rich <- emmeans(m_bact_rich, ~ salinity)
@@ -728,7 +716,7 @@ lab_bact_site <- bact_div_df %>%
 p_bact_rich_all <- ggplot(bact_div_df, aes(salinity, richness, fill = salinity)) +
   geom_boxplot(alpha = 0.85, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
-  scale_fill_manual(values = salinity_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = "Salinity treatment",
     y = "Taxonomic richness",
@@ -753,7 +741,7 @@ p_bact_rich_site <- ggplot(bact_div_df, aes(salinity, richness, fill = salinity)
   geom_boxplot(alpha = 0.85, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
   facet_wrap(~ Site) +
-  scale_fill_manual(values = salinity_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = "Salinity treatment",
     y = "Taxonomic richness",
@@ -809,7 +797,7 @@ bact_div_df <- bact_div_df %>%
   )
 
 # --- Mixed model for full factorial ---
-m_bact_rich_treat <- lmer(richness ~ treatment + (1 | Site), data = bact_div_df)
+m_bact_rich_treat <- lmerTest::lmer(richness ~ treatment + (1 | Site), data = bact_div_df)
 
 # --- Post-hoc comparisons among treatments ---
 emm_bact_treat <- emmeans(m_bact_rich_treat, ~ treatment)
@@ -822,7 +810,7 @@ lab_bact_treat <- cld_letters(emm_bact_treat) %>% select(treatment, .group)
 p_bact_rich_all_treat <- ggplot(bact_div_df, aes(treatment, richness, fill = treatment)) +
   geom_boxplot(alpha = 0.9, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
-  scale_fill_manual(values = treatment_palette, name = NULL) +
+  scale_fill_manual(values = salinity_palette_6, name = NULL) +
   labs(
     x = "Treatment",
     y = "Taxonomic richness",
@@ -845,7 +833,7 @@ p_bact_rich_site_treat <- ggplot(bact_div_df, aes(treatment, richness, fill = tr
   geom_boxplot(alpha = 0.9, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
   facet_wrap(~ Site) +
-  scale_fill_manual(values = treatment_palette, name = NULL) +
+  scale_fill_manual(values = salinity_palette_6, name = NULL) +
   labs(x = "Treatment", y = "Taxonomic richness", title = "(B) Per site") +
   theme_classic(base_size = 12) +
   theme(
@@ -895,7 +883,7 @@ bact_div_df <- bind_cols(
   bind_cols(df_bacteria_metadata)
 
 # ---- 2. Mixed model for richness ----
-m_bact_rich <- lmer(richness ~ salinity * nutrients + (1 | Site), data = bact_div_df)
+m_bact_rich <- lmerTest::lmer(richness ~ salinity * nutrients + (1 | Site), data = bact_div_df)
 
 # ---- 3. Post-hoc (salinity main effect) ----
 emm_bact_rich <- emmeans(m_bact_rich, ~ salinity)
@@ -905,7 +893,7 @@ lab_bact_global <- cld_letters(emm_bact_rich) %>% select(salinity, .group)
 p_bact_rich_all <- ggplot(bact_div_df, aes(salinity, richness, fill = salinity)) +
   geom_boxplot(alpha = 0.85, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
-  scale_fill_manual(values = salinity_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = "Salinity treatment",
     y = "Taxonomic richness",
@@ -978,7 +966,7 @@ bact_div_df <- bind_cols(
   )
 
 # ---- 2. Mixed model for bacterial richness ----
-m_bact_rich_treat <- lmer(richness ~ treatment + (1 | Site), data = bact_div_df)
+m_bact_rich_treat <-lmerTest::lmer(richness ~ treatment + (1 | Site), data = bact_div_df)
 
 emm_bact_treat <- emmeans(m_bact_rich_treat, ~ treatment)
 lab_bact_treat <- cld_letters(emm_bact_treat) %>% select(treatment, .group)
@@ -987,7 +975,7 @@ lab_bact_treat <- cld_letters(emm_bact_treat) %>% select(treatment, .group)
 p_bact_rich_all_treat <- ggplot(bact_div_df, aes(treatment, richness, fill = treatment)) +
   geom_boxplot(alpha = 0.9, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
-  scale_fill_manual(values = treatment_palette, name = NULL) +
+  scale_fill_manual(values = salinity_palette_6, name = NULL) +
   labs(
     x = "Treatment",
     y = "Taxonomic richness",
@@ -1097,7 +1085,7 @@ scores_df <- as_tibble(ord$points[, 1:2], .name_repair = ~ c("MDS1", "MDS2")) %>
 p_global <- ggplot(scores_df, aes(MDS1, MDS2, color = salinity)) +
   geom_point(size = 2.3, alpha = 0.9) +
   stat_ellipse(aes(group = salinity), linetype = "dashed", linewidth = 0.7, level = 0.95) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(title = "(A) All sites", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1112,7 +1100,7 @@ p_site <- ggplot(scores_df, aes(MDS1, MDS2, color = salinity)) +
   geom_point(size = 2.3, alpha = 0.9) +
   stat_ellipse(aes(group = salinity), linetype = "dashed", linewidth = 0.7, level = 0.95) +
   facet_wrap(~ site, ncol = 2) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(title = "(B) Per site", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1167,7 +1155,7 @@ scores_df <- scores_df %>%
 p_global_treat <- ggplot(scores_df, aes(MDS1, MDS2, color = treatment)) +
   geom_point(size = 2.3, alpha = 0.9) +
   stat_ellipse(aes(group = treatment), linetype = "dashed", linewidth = 0.7, level = 0.95) +
-  scale_color_manual(values = treatment_palette) +
+  scale_color_manual(values = salinity_palette_6) +
   labs(title = "(A) All sites", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1182,7 +1170,7 @@ p_site_treat <- ggplot(scores_df, aes(MDS1, MDS2, color = treatment)) +
   geom_point(size = 2.3, alpha = 0.9) +
   stat_ellipse(aes(group = treatment), linetype = "dashed", linewidth = 0.7, level = 0.95) +
   facet_wrap(~ site, ncol = 2) +
-  scale_color_manual(values = treatment_palette) +
+  scale_color_manual(values = salinity_palette_6) +
   labs(title = "(B) Per site", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1241,7 +1229,7 @@ p_bact_global <- ggplot(scores_bact, aes(MDS1, MDS2, color = salinity)) +
   geom_point(size = 2.3, alpha = 0.9) +
   stat_ellipse(aes(group = salinity), linetype = "dashed",
                linewidth = 0.7, level = 0.95) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(title = "(A) All sites", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1257,7 +1245,7 @@ p_bact_site <- ggplot(scores_bact, aes(MDS1, MDS2, color = salinity)) +
   stat_ellipse(aes(group = salinity), linetype = "dashed",
                linewidth = 0.7, level = 0.95) +
   facet_wrap(~ Site, ncol = 2) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(title = "(B) Per site", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1315,7 +1303,7 @@ p_bact_global_treat <- ggplot(scores_bact, aes(MDS1, MDS2, color = treatment)) +
   geom_point(size = 2.3, alpha = 0.9) +
   stat_ellipse(aes(group = treatment), linetype = "dashed",
                linewidth = 0.7, level = 0.95) +
-  scale_color_manual(values = treatment_palette) +
+  scale_color_manual(values = salinity_palette_6) +
   labs(title = "(A) All sites", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1331,7 +1319,7 @@ p_bact_site_treat <- ggplot(scores_bact, aes(MDS1, MDS2, color = treatment)) +
   stat_ellipse(aes(group = treatment), linetype = "dashed",
                linewidth = 0.7, level = 0.95) +
   facet_wrap(~ Site, ncol = 2) +
-  scale_color_manual(values = treatment_palette) +
+  scale_color_manual(values = salinity_palette_6) +
   labs(title = "(B) Per site", x = "NMDS1", y = "NMDS2") +
   theme_classic(base_size = 12) +
   theme(
@@ -1366,7 +1354,57 @@ ggsave(
 # Ellipses indicate 95% confidence intervals for each treatment group.
 
 ```
+### Combined analysis
+```{r fig.width=12, fig.height=12}
 
+# ======================================================
+# 1) COMBINED FIGURE — THREE-TREATMENT NMDS
+# Macro (Fig1_NMDS) + Bacteria (FigB2_NMDS)
+# ======================================================
+
+FigS2_nmds <- fig1_nmds / figB2_nmds +
+  plot_annotation(
+    title = "Supplementary Figure S2 — NMDS (Three-Treatment: Ambient / Low / High)",
+    theme = theme(
+      plot.title = element_text(size = 15, face = "bold", hjust = 0.0)
+    )
+  )
+
+FigS2_nmds
+
+ggsave(
+  filename = "figures/FigS2_Combined_NMDS_threeTreat.png",
+  plot = FigS2_nmds,
+  width = 11,
+  height = 10,
+  dpi = 400,
+  bg = "white"
+)
+
+# ======================================================
+# 2) COMBINED FIGURE — SIX-TREATMENT NMDS
+# Macro (FigS1_NMDS) + Bacteria (FigSB2_NMDS)
+# ======================================================
+
+FigSB2_nmds <- figS1_nmds / figSB2_nmds +
+  plot_annotation(
+    title = "Supplementary Figure SB2 — NMDS (Six-Treatment: ASAN–HSEN)",
+    theme = theme(
+      plot.title = element_text(size = 15, face = "bold", hjust = 0.0)
+    )
+  )
+
+FigSB2_nmds
+
+ggsave(
+  filename = "figures/FigSB2_Combined_NMDS_sixTreat.png",
+  plot = FigSB2_nmds,
+  width = 11,
+  height = 10,
+  dpi = 400,
+  bg = "white"
+)
+```
 
 
 ## Multivariate dispersion and PERMANOVA
@@ -1374,20 +1412,67 @@ ggsave(
 ### Macroinvertebrates
 
 ```{r perm}
+library(vegan)
+library(permute)
+library(broom)
+library(officer)
+library(flextable)
+
+# =========================================================
+# 1. Bray–Curtis dissimilarity
+# =========================================================
+
 bray <- vegdist(comm_log, method = "bray")
 
-bd_site  <- betadisper(bray, df_meta$site)
-bd_sal   <- betadisper(bray, df_meta$salinity)
+# =========================================================
+# 2. Homogeneity of multivariate dispersion  (PERMDISP)
+# =========================================================
 
-disp_site <- permutest(bd_site)
-disp_sal  <- permutest(bd_sal)
+bd_site <- betadisper(bray, df_meta$site)
+bd_sal  <- betadisper(bray, df_meta$salinity)
 
-perm <- adonis2(bray ~ site * salinity * nutrients, data = df_meta, permutations = 999)
+disp_site <- permutest(bd_site, permutations = 999)
+disp_sal  <- permutest(bd_sal, permutations = 999)
 
-perm_df <- broom::tidy(perm)
-save_table_docx(perm_df, "tables/Table1_PERMANOVA.docx",
-                title = "Table 1. PERMANOVA results",
-                subtitle = "Effects of site, salinity, and nutrients on community composition.")
+# ---------------------------------------------------------
+# RESTRICTED PERMUTATIONS WITH SITE AS RANDOM BLOCK
+# ---------------------------------------------------------
+ctrl <- how(blocks = df_meta$site)
+
+# ---------------------------------------------------------
+# PERMANOVA (Type II)
+# ---------------------------------------------------------
+perm <- adonis2(
+  bray ~ salinity + nutrients + salinity * nutrients,
+  data = df_meta,
+  permutations = ctrl,
+  by = "margin"
+)
+
+perm
+
+# =========================================================
+# 4. Tidy PERMANOVA output
+# =========================================================
+
+perm_df_clean <- perm %>%
+  select(
+    term,
+    df,
+    sum_of_squares = SumOfSqs,
+    R2,
+    F = statistic,
+    p = p.value
+  )
+
+perm_df_clean
+
+save_table_docx(
+  perm_df_clean,
+  file = "tables/Table1_PERMANOVA.docx",
+  title = "Table 1. PERMANOVA results",
+  subtitle = "Effects of salinity and nutrients on community composition (permutations restricted within site)."
+)
 ```
 
 ### PCA and dbRDA
@@ -1432,7 +1517,7 @@ pca_plot <- ggplot(env_scores, aes(PC1, PC2, color = salinity)) +
     color = "black", size = 3.4, bg.colour = "white",
     inherit.aes = FALSE
   ) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = paste0("PC1 (", pca_ax1, "%)"),
     y = paste0("PC2 (", pca_ax2, "%)"),
@@ -1482,7 +1567,7 @@ db_plot <- ggplot(site_sc, aes(dbRDA1, dbRDA2, color = salinity)) +
     color = "black", size = 3.4, bg.colour = "white",
     inherit.aes = FALSE
   ) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = paste0("dbRDA1 (", ax1, "%)"),
     y = paste0("dbRDA2 (", ax2, "%)"),
@@ -1627,7 +1712,7 @@ pca_plot_b <- ggplot(env_scores_b, aes(PC1, PC2, color = salinity)) +
     color = "black", size = 3.4, bg.colour = "white",
     inherit.aes = FALSE
   ) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = paste0("PC1 (", pca_ax1_b, "%)"),
     y = paste0("PC2 (", pca_ax2_b, "%)"),
@@ -1677,7 +1762,7 @@ db_plot_b <- ggplot(site_sc_b, aes(dbRDA1, dbRDA2, color = salinity)) +
     color = "black", size = 3.4, bg.colour = "white",
     inherit.aes = FALSE
   ) +
-  scale_color_manual(values = salinity_palette, name = "Salinity") +
+  scale_color_manual(values = salinity_palette_3, name = "Salinity") +
   labs(
     x = paste0("dbRDA1 (", ax1_b, "%)"),
     y = paste0("dbRDA2 (", ax2_b, "%)"),
@@ -1767,7 +1852,7 @@ if (length(sig_taxa)) {
     geom_boxplot(alpha = 0.8, outlier.shape = NA) +
     geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
     facet_wrap(~ taxon, scales = "free_y") +
-    scale_fill_manual(values = salinity_palette) +
+    scale_fill_manual(values = salinity_palette_3) +
     labs(
       x = "Salinity",
       y = "log1p(Abundance)",
@@ -1841,7 +1926,7 @@ if (length(sig_taxa_treat)) {
     geom_boxplot(alpha = 0.9, outlier.shape = NA) +
     geom_jitter(width = 0.15, alpha = 0.6, size = 1) +
     facet_wrap(~ taxon, scales = "free_y") +
-    scale_fill_manual(values = treatment_palette) +
+    scale_fill_manual(values = salinity_palette_6) +
     labs(
       x = "Treatment",
       y = "log1p(Abundance)",
@@ -1913,7 +1998,7 @@ df_long <- groups_salinization %>%
   mutate(log_abund = log(abundance + 0.01))
 
 # --- LMM for group abundance ---
-m_grp <- lmer(log_abund ~ salinity + (1|site) + (1|group), data = df_long)
+m_grp <-lmerTest::lmer(log_abund ~ salinity + (1|site) + (1|group), data = df_long)
 emm_grp <- emmeans(m_grp, ~ salinity)
 lab_grp <- cld_letters(emm_grp) %>% select(salinity, .group)
 
@@ -1922,7 +2007,7 @@ p_all <- ggplot(df_long, aes(salinity, log_abund, fill = salinity)) +
   geom_boxplot(alpha = 0.8, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.5, size = 1) +
   facet_wrap(~ group, scales = "free_y") +
-  scale_fill_manual(values = salinity_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette_3, name = "Salinity") +
   geom_text(data = lab_grp,
             aes(y = max(df_long$log_abund, na.rm = TRUE) + 0.1, label = .group),
             vjust = 0, fontface = "bold") +
@@ -1940,7 +2025,7 @@ p_site <- ggplot(df_long, aes(salinity, log_abund, fill = salinity)) +
   geom_boxplot(alpha = 0.8, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.5, size = 1) +
   facet_grid(site ~ group, scales = "free_y") +
-  scale_fill_manual(values = salinity_palette, name = "Salinity") +
+  scale_fill_manual(values = salinity_palette_3, name = "Salinity") +
   labs(x = "Salinity treatment", y = "log(Abundance + 0.01)",
        title = "(B) Top 4 major groups — by site") +
   theme_classic(base_size = 12) +
@@ -2010,7 +2095,7 @@ p_all_treat <- ggplot(df_long, aes(treatment, log_abund, fill = treatment)) +
   geom_boxplot(alpha = 0.9, outlier.shape = NA, width = 0.6) +
   geom_jitter(width = 0.15, height = 0, alpha = 0.6, size = 1) +
   facet_wrap(~ group, scales = "free_y") +
-  scale_fill_manual(values = treatment_palette, name = NULL) +
+  scale_fill_manual(values = salinity_palette_6, name = NULL) +
   labs(x = NULL, y = "log(Abundance + 0.01)", title = "(A) All sites") +
   theme_classic(base_size = 12) +
   theme(
@@ -2026,7 +2111,7 @@ p_site_treat <- ggplot(df_long, aes(treatment, log_abund, fill = treatment)) +
   geom_boxplot(alpha = 0.9, outlier.shape = NA, width = 0.6) +
   geom_jitter(width = 0.15, height = 0, alpha = 0.6, size = 1) +
   facet_grid(site ~ group, scales = "free_y") +
-  scale_fill_manual(values = treatment_palette, name = NULL) +
+  scale_fill_manual(values = salinity_palette_6, name = NULL) +
   labs(x = NULL, y = "log(Abundance + 0.01)", title = "(B) Per site") +
   theme_classic(base_size = 12) +
   theme(
