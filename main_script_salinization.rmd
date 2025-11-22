@@ -36,6 +36,7 @@ library(stringr)
 library(parallel)
 library(cowplot)
 library(janitor)
+library(readr)
 
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
@@ -510,6 +511,24 @@ p_rich_all <- ggplot(div_df, aes(salinity, richness, fill = salinity)) +
     panel.border = element_rect(colour = "black", fill = NA)
   )
 
+# --- Generate per-site post-hoc letters for macro richness ---
+lab_site <- div_df %>%
+  group_split(site) %>%
+  purrr::map_dfr(function(d) {
+    # simple LM per site
+    m <- lm(richness ~ salinity, data = d)
+
+    # try to extract letters
+    out <- tryCatch(
+      cld_letters(emmeans(m, ~ salinity)) %>% as_tibble(),
+      error = function(e) tibble()
+    )
+
+    if (nrow(out)) out$site <- unique(d$site)
+    out
+  }) %>%
+  select(site, salinity, .group)
+
 # --- Per-site plot ---
 p_rich_site <- ggplot(div_df, aes(salinity, richness, fill = salinity)) +
   geom_boxplot(alpha = 0.85, outlier.shape = NA) +
@@ -544,14 +563,6 @@ ggsave(
   width = 11, height = 5.5, dpi = 400, bg = "white"
 )
 
-# --- Export table to Word ---
-tab_rich <- broom.mixed::tidy(m_rich)
-save_table_docx(
-  tab_rich,
-  "tables/Table2_Richness.docx",
-  title = "Table 2. Mixed-effects model for taxonomic richness",
-  subtitle = "LMM results for richness as a function of salinity, nutrients, and site (random effect)."
-)
 
 # --- Combine salinity × nutrients into single factor with proper nomenclature ---
 div_df <- div_df %>%
@@ -634,13 +645,6 @@ ggsave("figures/FigS2_Richness.png", plot = figS2, width = 11, height = 5.5, dpi
 
 figS2
 
-tab_rich_treat <- broom.mixed::tidy(m_rich_treat)
-
-save_table_docx(
-  tab_rich_treat, "tables/TableS2_Richness.docx",
-  title = "Table S2. Mixed-effects model for taxonomic richness by treatment",
-  subtitle = "LMM results for richness across ASAN, ASEN, MSAN, MSEN, HSAN, and HSEN treatments (site as a random effect)."
-)
 ```
 
 ### Bacteria
@@ -770,14 +774,6 @@ ggsave(
   width = 11, height = 5.5, dpi = 400, bg = "white"
 )
 
-# --- Export table to Word ---
-tab_bact_rich <- broom.mixed::tidy(m_bact_rich)
-save_table_docx(
-  tab_bact_rich,
-  "tables/TableB1_Bacteria_Richness.docx",
-  title = "Table B1. Mixed-effects model for bacterial richness",
-  subtitle = "LMM results for bacterial richness as a function of salinity, nutrients, and site (random effect)."
-)
 
 # ==============================================================
 # FULL FACTORIAL (salinity × nutrients)
@@ -859,12 +855,6 @@ ggsave("figures/FigSB1_Bacteria_Richness.png", plot = figSB1, width = 11, height
 
 figSB1
 
-tab_bact_rich_treat <- broom.mixed::tidy(m_bact_rich_treat)
-save_table_docx(
-  tab_bact_rich_treat, "tables/TableSB1_Bacteria_Richness.docx",
-  title = "Table SB1. Mixed-effects model for bacterial richness by treatment",
-  subtitle = "LMM results for bacterial richness across ASAN, ASEN, MSAN, MSEN, HSAN, and HSEN treatments (site as a random effect)."
-)
 
 ```
 ### Combined analysis
@@ -1434,45 +1424,6 @@ bd_sal  <- betadisper(bray, df_meta$salinity)
 disp_site <- permutest(bd_site, permutations = 999)
 disp_sal  <- permutest(bd_sal, permutations = 999)
 
-# ---------------------------------------------------------
-# RESTRICTED PERMUTATIONS WITH SITE AS RANDOM BLOCK
-# ---------------------------------------------------------
-ctrl <- how(blocks = df_meta$site)
-
-# ---------------------------------------------------------
-# PERMANOVA (Type II)
-# ---------------------------------------------------------
-perm <- adonis2(
-  bray ~ salinity + nutrients + salinity * nutrients,
-  data = df_meta,
-  permutations = ctrl,
-  by = "margin"
-)
-
-perm
-
-# =========================================================
-# 4. Tidy PERMANOVA output
-# =========================================================
-
-perm_df_clean <- perm %>%
-  select(
-    term,
-    df,
-    sum_of_squares = SumOfSqs,
-    R2,
-    F = statistic,
-    p = p.value
-  )
-
-perm_df_clean
-
-save_table_docx(
-  perm_df_clean,
-  file = "tables/Table1_PERMANOVA.docx",
-  title = "Table 1. PERMANOVA results",
-  subtitle = "Effects of salinity and nutrients on community composition (permutations restricted within site)."
-)
 ```
 
 ### PCA and dbRDA
@@ -1596,14 +1547,6 @@ ggsave(
   bg = "white"
 )
 
-# --- Export dbRDA results table ---
-tab_dbrda <- broom::tidy(anova(best, by = "terms", permutations = 999))
-save_table_docx(
-  tab_dbrda,
-  "tables/Table3_dbRDA.docx",
-  title = "Table 3. Distance-based redundancy analysis (dbRDA) results",
-  subtitle = "dbRDA results showing environmental variables explaining community composition variation."
-)
 
 ```
 
@@ -1627,25 +1570,6 @@ cat("PERMDISP by site:\n")
 print(disp_site_bact)
 cat("\nPERMDISP by salinity:\n")
 print(disp_sal_bact)
-
-# --- PERMANOVA (site × salinity × nutrients) ---
-perm_bact <- adonis2(bray_bact ~ Site * salinity * nutrients,
-                     data = df_bacteria_metadata,
-                     permutations = 999)
-
-# --- Format results for export ---
-perm_bact_df <- broom::tidy(perm_bact)
-
-# --- Export PERMANOVA results to Word ---
-save_table_docx(
-  perm_bact_df,
-  "tables/TableB2_PERMANOVA.docx",
-  title = "Table B2. PERMANOVA results for bacterial communities",
-  subtitle = "Effects of site, salinity, and nutrients on bacterial community composition."
-)
-
-# --- Optional console summary ---
-perm_bact_df
 
 ```
 
@@ -1877,13 +1801,6 @@ if (length(sig_taxa)) {
 
 fig5_Indicators
 
-# --- Save table for significant taxa ---
-save_table_docx(
-  taxa_p,
-  "tables/Table4_Indicators.docx",
-  title = "Table 4. Significant taxa associated with salinity levels",
-  subtitle = "Results from univariate ANOVA per taxon (p < 0.05)."
-)
 
 # ===============================================================
 # SUPPLEMENTARY FIGURE S3: Expanded six-treatment comparison
@@ -1952,13 +1869,6 @@ if (length(sig_taxa_treat)) {
 
 figS3_Indicators
 
-# --- Save table for six-treatment analysis ---
-save_table_docx(
-  taxa_p_treat,
-  "tables/TableS3_Indicators.docx",
-  title = "Table S3. Significant taxa associated with combined salinity × nutrient treatments",
-  subtitle = "Results from univariate ANOVA per taxon (p < 0.05)."
-)
 
 ```
 
@@ -2042,11 +1952,6 @@ ggsave("figures/Fig4_Groups.png", plot = fig4,
 
 fig4
 
-# --- Save model results ---
-tab_grp <- broom.mixed::tidy(m_grp)
-save_table_docx(tab_grp, "tables/Table5_Groups.docx",
-                title = "Table 5. Mixed-effects model for top four taxonomic groups",
-                subtitle = "LMM results for log-transformed abundances as a function of salinity, with site and group as random effects.")
 
 # ==========================================================
 # Supplementary Figure S4 – Top 4 major groups (six treatments)
@@ -2609,6 +2514,93 @@ ggplot(phylum_grouped_clean,
     increase_with_salinity = "#1b9e77"
   ))
 ```
+# Prepare datasets for PRIMER
+```{r}
+# ====== EXPORT FOR PRIMER: MACROINVERTEBRATES ======
+
+# (A) COMMUNITY MATRICES
+macro_comm_raw  <- comm_raw %>% rownames_to_column("SampleID")
+macro_comm_log  <- comm_log %>% rownames_to_column("SampleID")
+macro_comm_pa   <- comm_pa  %>% rownames_to_column("SampleID")
+
+write_csv(macro_comm_raw, "data/PRIMER_exports/macro_comm_raw.csv")
+write_csv(macro_comm_log, "data/PRIMER_exports/macro_comm_log1p.csv")
+write_csv(macro_comm_pa,  "data/PRIMER_exports/macro_comm_pa.csv")
+
+# (B) METADATA (ensure same order)
+macro_meta_export <- df_meta %>%
+  mutate(SampleID = row_number()) %>%   # matches row order of comm matrices
+  select(SampleID, site, salinity, nutrients)
+
+write_csv(macro_meta_export, "data/PRIMER_exports/macro_metadata.csv")
+
+# ====== EXPORT FOR PRIMER: BACTERIA ======
+
+# (A) COMMUNITY MATRICES
+bact_comm_raw <- comm_bacteria %>%
+  arrange(sample_code) %>%
+  as.data.frame() %>%
+  column_to_rownames("sample_code") %>%
+  rownames_to_column("SampleID")
+
+bact_comm_log <- bact_comm_raw %>%
+  mutate(across(-SampleID, log1p))
+
+bact_comm_pa <- bact_comm_raw %>%
+  mutate(across(-SampleID, ~ ifelse(.x > 0, 1, 0)))
+
+write_csv(bact_comm_raw, "data/PRIMER_exports/bact_comm_raw.csv")
+write_csv(bact_comm_log, "data/PRIMER_exports/bact_comm_log1p.csv")
+write_csv(bact_comm_pa,  "data/PRIMER_exports/bact_comm_pa.csv")
+
+# (B) METADATA
+bact_metadata_export <- df_bacteria_metadata %>%
+  filter(sample_code %in% bact_comm_raw$SampleID) %>%
+  rename(SampleID = sample_code) %>%
+  select(SampleID, Site, salinity, nutrients, Treatment)
+
+write_csv(bact_metadata_export, "data/PRIMER_exports/bacteria_metadata.csv")
+
+# ===========================
+# ENVIRONMENTAL DATA FOR PRIMER (MACROINVERTEBRATES)
+# ===========================
+
+write_csv(df_meta, "data/PRIMER_exports/df_meta.csv")
+
+
+# Add SampleID aligned with community matrices
+macro_env_export <- df_meta %>%
+  mutate(SampleID = row_number()) %>%
+  select(
+    SampleID,
+    site, salinity, nutrients,
+    chlorophyll_a,
+    pH,
+    initial_conductivity,
+    conductivity,
+    oxygen,
+    nitrites,
+    phosphates
+  )
+
+# Add treatment (optional but recommended)
+macro_env_export <- macro_env_export %>%
+  mutate(
+    treatment = case_when(
+      salinity == "Ambient" & nutrients == "Ambient" ~ "ASAN",
+      salinity == "Ambient" & nutrients == "High"    ~ "ASEN",
+      salinity == "Low"     & nutrients == "Ambient" ~ "MSAN",
+      salinity == "Low"     & nutrients == "High"    ~ "MSEN",
+      salinity == "High"    & nutrients == "Ambient" ~ "HSAN",
+      salinity == "High"    & nutrients == "High"    ~ "HSEN"
+    )
+  ) %>%
+  relocate(treatment, .after = nutrients) %>% 
+  as.data.frame()
+
+# Export
+write_csv(macro_env_export, "data/PRIMER_exports/macro_comm_raw.csv")
+
 
 ```
 
